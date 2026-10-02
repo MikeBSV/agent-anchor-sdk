@@ -34,6 +34,39 @@ console.log('seller address', seller.toAddress('testnet'))
 
 Type `.exit` when done. Store the WIFs privately. Send tBSV only to the **funding address**. The seller address does not need a faucet for these tests.
 
+## Storage (`hash` vs `cipher`)
+
+The protocol is a signed receipt that these **bytes** existed. File format and compression are up to you (JSON, zip, PDF, gzip-then-JSON, and so on). Compress first if you want, then pass that `Uint8Array` as `content`. A verifier must be given the **same** bytes.
+
+| Mode | What goes on-chain | Who picks the file format |
+|---|---|---|
+| **`hash` (default)** | 32-byte SHA-256 only. Plaintext stays off-chain. | Fully yours: any format, any compression, any store. Proof is “here are the bytes; they match the hash.” |
+| **`cipher`** | AES-256-GCM ciphertext (12-byte nonce, 16-byte tag appended), plus SHA-256 of that ciphertext. Cap **100,000** bytes so WhatsOnChain does not truncate. | Layout inside the plaintext is still yours, but the envelope is this SDK’s AES-256-GCM and a **separate 32-byte data key** (never funding or identity). |
+
+`npm run example` uses hash mode. Cipher:
+
+```js
+const { Random } = require('@bsv/sdk')
+const { CIPHER_MODE, decryptPayload } = require('./dist')
+
+const dataKey = Uint8Array.from(Random(32)) // store off-chain; the SDK does not keep it
+await anchor.anchor(
+  {
+    sessionId: 'job-1',
+    sequence: 1,
+    content: new TextEncoder().encode('whatever file bytes'),
+    mode: CIPHER_MODE,
+    dataKey
+  },
+  broadcaster
+)
+
+// later, from the on-chain record:
+const plain = decryptPayload(record.ciphertext, record.nonce, dataKey)
+```
+
+Field-level wire format: [PROTOCOL.md](PROTOCOL.md).
+
 ## Testnet example
 
 ARC is an HTTP API, not a website. Opening the host in a browser often shows `no matching operation was found`. That is normal.
@@ -64,7 +97,7 @@ WIFs pasted in this chat or a terminal log are testnet-only. Do not reuse them o
 
 ## Escrow
 
-`lockEscrow` / `completeEscrow` / `refundEscrow` lock satoshis in a native Bitcoin script (no sCrypt). This package is testnet-only.
+`lockEscrow` / `completeEscrow` / `refundEscrow` lock satoshis in a native Bitcoin script (no sCrypt). This package is testnet-only. The script only sees two Bitcoin keys: two humans, two agents, or a human paying an agent all work the same.
 
 `FUNDING_WIF` is the **buyer**. They lock coins, pay both transaction fees, and later either pay the seller or refund themselves. The **seller** only needs a key (and, on complete, to sign). `IDENTITY_WIF` is not used here.
 
