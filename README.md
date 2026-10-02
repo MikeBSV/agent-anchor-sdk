@@ -51,13 +51,28 @@ Optional:
 
 - `ARC_URL` — default `https://testnet.arc.gorillapool.io` (no `/v1` suffix; the SDK adds `/v1/tx`)
 - `ARC_API_KEY` — only if the ARC host requires it
-- `BROADCAST=woc` — broadcast through WhatsOnChain instead of ARC
 - `INDEXER_BASE_URL` — default `https://api.whatsonchain.com/v1/bsv/test`
 
 Keep the quotes around the WIFs in PowerShell. After the faucet pays you, wait until `https://test.whatsonchain.com/address/<funding-address>` shows the coins (confirmed is more reliable than mempool-only). Then run `npm run example` again. Do not put the address in `FUNDING_WIF`.
 
 The example broadcasts two linked records in one process. The wallet remembers the first spend and its change so the second record does not double-spend a stale indexer UTXO. If a previous run already spent your faucet coin and that tx is still in the mempool, wait for it to confirm (or for its change to appear) before running the example again.
 
-## Scope
+WIFs pasted in this chat or a terminal log are testnet-only. Do not reuse them on mainnet.
 
-sCrypt escrow is a follow-up project, not in this package.
+## Escrow
+
+`lockEscrow` / `completeEscrow` / `refundEscrow` lock satoshis in a native Bitcoin script (no sCrypt). This package is testnet-only.
+
+- **Complete:** buyer and seller both sign (`SIGHASH_ALL`). The coins go to the seller’s P2PKH.
+- **Refund:** after the script locktime, the buyer alone signs. The spending transaction sets `nLockTime` and input `sequence` `0xfffffffe`. The coins go back to the buyer’s P2PKH.
+
+`npm test` mocks both paths. Live testnet (GorillaPool ARC, quoted WIFs):
+
+```
+$env:FUNDING_WIF="..."
+npm run escrow
+```
+
+That locks `ESCROW_SATS` (default 5000) then **completes** to the seller. Generate a throwaway seller unless you set `SELLER_WIF`. Optional: `ESCROW_PATH=refund` (script locktime is one hour ago so the refund can broadcast in the same run), `ESCROW_SATS`, `ARC_URL`, `ARC_API_KEY`. The buyer funding address must have confirmed tBSV for the lock plus two fees.
+
+Do not reuse these WIFs on mainnet.

@@ -7,7 +7,8 @@
   "scripts": {
     "build": "tsc",
     "test": "jest",
-    "example": "npx ts-node --transpile-only scripts/anchor-two-records.ts"
+    "example": "npx ts-node --transpile-only scripts/anchor-two-records.ts",
+    "escrow": "npx ts-node --transpile-only scripts/escrow-testnet.ts"
   },
   "license": "MIT",
   "engines": {

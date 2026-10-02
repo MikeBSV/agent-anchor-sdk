@@ -81,6 +81,10 @@ export class AgentWallet {
     )
   }
 
+  async getRawTxHex(txid: string): Promise<string> {
+    return this.localTxHex.get(txid) ?? this.indexer.getRawTxHex(txid)
+  }
+
   async addFundingInputs(tx: Transaction, selected: Utxo[]): Promise<void> {
     for (const utxo of selected) {
       const hex = this.localTxHex.get(utxo.txid) ?? (await this.indexer.getRawTxHex(utxo.txid))
