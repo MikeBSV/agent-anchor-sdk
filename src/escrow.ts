@@ -5,7 +5,6 @@ import {
   P2PKH,
   PrivateKey,
   PublicKey,
-  SatoshisPerKilobyte,
   Spend,
   Transaction,
   TransactionSignature,
@@ -22,6 +21,13 @@ export interface EscrowLockResult {
   txid: string
   outputIndex: number
   satoshis: number
+  feeSatoshis: number
+}
+
+export interface EscrowSpendResult {
+  txid: string
+  paidSatoshis: number
+  feeSatoshis: number
 }
 
 function compressedPub(key: PublicKey): number[] {
@@ -158,6 +164,32 @@ function assertSpendValid(tx: Transaction, inputIndex = 0): void {
   spend.validate()
 }
 
+function txFeeSatoshis(tx: Transaction): number {
+  let incoming = 0
+  for (const input of tx.inputs) {
+    const source = input.sourceTransaction
+    if (!source) {
+      throw new Error('Escrow transaction is missing sourceTransaction')
+    }
+    incoming += source.outputs[input.sourceOutputIndex].satoshis ?? 0
+  }
+  const outgoing = tx.outputs.reduce((sum, output) => sum + (output.satoshis ?? 0), 0)
+  return incoming - outgoing
+}
+
+async function payExactWithBuyerFee(
+  buyerWallet: AgentWallet,
+  tx: Transaction,
+  satoshis: number,
+  lockingScript: LockingScript
+): Promise<void> {
+  const feeCoins = await buyerWallet.selectUtxos(400)
+  await buyerWallet.addFundingInputs(tx, feeCoins)
+  tx.addOutput({ satoshis, lockingScript })
+  buyerWallet.addChangeOutput(tx)
+  await buyerWallet.applyFeeAndSign(tx)
+}
+
 async function loadEscrowSource(
   wallet: AgentWallet,
   escrowTxid: string,
@@ -193,7 +225,8 @@ export async function lockEscrow(
   if (outputIndex < 0) {
     throw new Error('Escrow output missing after lock')
   }
-  return { txid, outputIndex, satoshis: tx.outputs[outputIndex].satoshis ?? satoshis }
+  const lockedSatoshis = tx.outputs[outputIndex].satoshis ?? satoshis
+  return { txid, outputIndex, satoshis: lockedSatoshis, feeSatoshis: txFeeSatoshis(tx) }
 }
 
 export async function completeEscrow(
@@ -203,8 +236,9 @@ export async function completeEscrow(
   escrow: { txid: string; outputIndex: number },
   sellerAddress: string,
   broadcaster: TxBroadcaster
-): Promise<string> {
+): Promise<EscrowSpendResult> {
   const source = await loadEscrowSource(buyerWallet, escrow.txid, escrow.outputIndex)
+  const paidSatoshis = source.outputs[escrow.outputIndex].satoshis ?? 0
   const tx = new Transaction()
   tx.addInput({
     sourceTransaction: source,
@@ -212,14 +246,15 @@ export async function completeEscrow(
     unlockingScriptTemplate: completeUnlockTemplate(buyerKey, sellerKey),
     sequence: 0xffffffff
   })
-  tx.addOutput({
-    lockingScript: new P2PKH().lock(sellerAddress),
-    change: true
-  })
-  await tx.fee(new SatoshisPerKilobyte(buyerWallet.satoshisPerKb))
-  await tx.sign()
+  await payExactWithBuyerFee(
+    buyerWallet,
+    tx,
+    paidSatoshis,
+    new P2PKH().lock(sellerAddress)
+  )
   assertSpendValid(tx)
-  return buyerWallet.broadcast(tx, broadcaster)
+  const txid = await buyerWallet.broadcast(tx, broadcaster)
+  return { txid, paidSatoshis, feeSatoshis: txFeeSatoshis(tx) }
 }
 
 export async function refundEscrow(
@@ -227,7 +262,7 @@ export async function refundEscrow(
   escrow: { txid: string; outputIndex: number },
   locktime: number,
   broadcaster: TxBroadcaster
-): Promise<string> {
+): Promise<EscrowSpendResult> {
   const source = await loadEscrowSource(buyerWallet, escrow.txid, escrow.outputIndex)
   const requiredLocktime = scriptLocktime(source.outputs[escrow.outputIndex].lockingScript)
   if (locktime < requiredLocktime) {
@@ -235,6 +270,7 @@ export async function refundEscrow(
       `Refund nLockTime ${locktime} is before script locktime ${requiredLocktime}`
     )
   }
+  const paidSatoshis = source.outputs[escrow.outputIndex].satoshis ?? 0
   const tx = new Transaction()
   tx.lockTime = locktime
   tx.addInput({
@@ -243,12 +279,13 @@ export async function refundEscrow(
     unlockingScriptTemplate: refundUnlockTemplate(buyerWallet.fundingKey),
     sequence: REFUND_SEQUENCE
   })
-  tx.addOutput({
-    lockingScript: new P2PKH().lock(buyerWallet.address),
-    change: true
-  })
-  await tx.fee(new SatoshisPerKilobyte(buyerWallet.satoshisPerKb))
-  await tx.sign()
+  await payExactWithBuyerFee(
+    buyerWallet,
+    tx,
+    paidSatoshis,
+    new P2PKH().lock(buyerWallet.address)
+  )
   assertSpendValid(tx)
-  return buyerWallet.broadcast(tx, broadcaster)
+  const txid = await buyerWallet.broadcast(tx, broadcaster)
+  return { txid, paidSatoshis, feeSatoshis: txFeeSatoshis(tx) }
 }

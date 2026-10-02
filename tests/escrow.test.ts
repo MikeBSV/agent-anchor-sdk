@@ -31,7 +31,7 @@ describe('escrow', () => {
     const seller = PrivateKey.fromRandom()
     const broadcaster = new MemoryBroadcaster()
     const locked = await lockEscrow(wallet, seller.toPublicKey(), 10_000, LOCKTIME, broadcaster)
-    const payTxid = await completeEscrow(
+    const pay = await completeEscrow(
       wallet,
       wallet.fundingKey,
       seller,
@@ -39,11 +39,15 @@ describe('escrow', () => {
       seller.toAddress('testnet'),
       broadcaster
     )
-    expect(payTxid).toHaveLength(64)
-    const pay = broadcaster.lastTx!
-    expect(pay.outputs[0].lockingScript.toHex()).toBe(new P2PKH().lock(seller.toAddress('testnet')).toHex())
-    expect(pay.outputs[0].satoshis).toBeGreaterThan(0)
-    expect(pay.outputs[0].satoshis).toBeLessThan(10_000)
+    expect(pay.txid).toHaveLength(64)
+    expect(pay.paidSatoshis).toBe(10_000)
+    expect(pay.feeSatoshis).toBeGreaterThan(0)
+    const payTx = broadcaster.lastTx!
+    expect(payTx.outputs[0].lockingScript.toHex()).toBe(new P2PKH().lock(seller.toAddress('testnet')).toHex())
+    expect(payTx.outputs[0].satoshis).toBe(10_000)
+    expect(payTx.outputs.some((o) => o.lockingScript.toHex() === new P2PKH().lock(wallet.address).toHex())).toBe(
+      true
+    )
   })
 
   it('rejects complete when only the seller signs', async () => {
@@ -69,13 +73,15 @@ describe('escrow', () => {
     const seller = PrivateKey.fromRandom()
     const broadcaster = new MemoryBroadcaster()
     const locked = await lockEscrow(wallet, seller.toPublicKey(), 10_000, LOCKTIME, broadcaster)
-    const refundTxid = await refundEscrow(wallet, locked, LOCKTIME, broadcaster)
-    expect(refundTxid).toHaveLength(64)
-    const refund = broadcaster.lastTx!
-    expect(refund.lockTime).toBe(LOCKTIME)
-    expect(refund.inputs[0].sequence).toBe(0xfffffffe)
-    expect(refund.outputs[0].lockingScript.toHex()).toBe(new P2PKH().lock(wallet.address).toHex())
-    expect(refund.outputs[0].satoshis).toBeGreaterThan(0)
+    const refund = await refundEscrow(wallet, locked, LOCKTIME, broadcaster)
+    expect(refund.txid).toHaveLength(64)
+    expect(refund.paidSatoshis).toBe(10_000)
+    expect(refund.feeSatoshis).toBeGreaterThan(0)
+    const refundTx = broadcaster.lastTx!
+    expect(refundTx.lockTime).toBe(LOCKTIME)
+    expect(refundTx.inputs[0].sequence).toBe(0xfffffffe)
+    expect(refundTx.outputs[0].lockingScript.toHex()).toBe(new P2PKH().lock(wallet.address).toHex())
+    expect(refundTx.outputs[0].satoshis).toBe(10_000)
   })
 
   it('locks a second escrow from local change without refreshing the indexer', async () => {

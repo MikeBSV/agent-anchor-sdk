@@ -23,13 +23,16 @@ Generate them in PowerShell from this folder (`cd C:\Users\mikec\agent-anchor-sd
 const { PrivateKey } = require('@bsv/sdk')
 const funding = PrivateKey.fromRandom()
 const identity = PrivateKey.fromRandom()
+const seller = PrivateKey.fromRandom()
 console.log('FUNDING_WIF', funding.toWif())
 console.log('funding address', funding.toAddress('testnet'))
 console.log('IDENTITY_WIF', identity.toWif())
 console.log('identity address', identity.toAddress('testnet'))
+console.log('SELLER_WIF', seller.toWif())
+console.log('seller address', seller.toAddress('testnet'))
 ```
 
-Type `.exit` when done. Store the WIFs privately. Send tBSV only to the **funding address**.
+Type `.exit` when done. Store the WIFs privately. Send tBSV only to the **funding address**. The seller address does not need a faucet for these tests.
 
 ## Testnet example
 
@@ -63,16 +66,42 @@ WIFs pasted in this chat or a terminal log are testnet-only. Do not reuse them o
 
 `lockEscrow` / `completeEscrow` / `refundEscrow` lock satoshis in a native Bitcoin script (no sCrypt). This package is testnet-only.
 
-- **Complete:** buyer and seller both sign (`SIGHASH_ALL`). The coins go to the seller’s P2PKH.
-- **Refund:** after the script locktime, the buyer alone signs. The spending transaction sets `nLockTime` and input `sequence` `0xfffffffe`. The coins go back to the buyer’s P2PKH.
+`FUNDING_WIF` is the **buyer**. They lock coins, pay both transaction fees, and later either pay the seller or refund themselves. The **seller** only needs a key (and, on complete, to sign). `IDENTITY_WIF` is not used here.
 
-`npm test` mocks both paths. Live testnet (GorillaPool ARC, quoted WIFs):
+Two on-chain transactions:
+
+1. **Lock** — buyer P2PKH → escrow output of exactly `ESCROW_SATS`, plus change back to the buyer. WoC shows that output as `nonstandard` / ScriptHash.
+2. **Complete** — buyer and seller both sign (`SIGHASH_ALL`). The seller’s P2PKH receives **exactly** `ESCROW_SATS`. The complete fee is paid from the buyer’s change, not taken out of the seller’s payout.
+3. **Refund** (instead of complete) — after the script locktime, the buyer alone signs. `nLockTime` is set and the escrow input uses sequence `0xfffffffe`. The buyer receives exactly `ESCROW_SATS` back; the refund fee is also paid from their other coins.
+
+`npm test` mocks those paths (lock, pay seller, seller-alone fails, early refund fails, on-time refund, second lock from local change).
+
+A run with only `FUNDING_WIF` still works: the script creates a **random seller in memory**, completes to that address, then exits. That address is real testnet P2PKH, but you cannot spend it unless you set `SELLER_WIF`. Use a seller WIF you keep when you want to open the seller on WhatsOnChain.
+
+Live complete (buyer you fund, seller you control):
 
 ```
 $env:FUNDING_WIF="..."
+$env:SELLER_WIF="..."
+$env:ESCROW_SATS="5000"
+$env:SATOSHIS_PER_KB="1"
 npm run escrow
 ```
 
-That locks `ESCROW_SATS` (default 5000) then **completes** to the seller. Generate a throwaway seller unless you set `SELLER_WIF`. Optional: `ESCROW_PATH=refund` (script locktime is one hour ago so the refund can broadcast in the same run), `ESCROW_SATS`, `ARC_URL`, `ARC_API_KEY`. The buyer funding address must have confirmed tBSV for the lock plus two fees.
+It prints lock/complete txids, both fees (buyer), and `seller receives satoshis` (should match `ESCROW_SATS`). Check:
+
+- `https://test.whatsonchain.com/tx/<lock-txid>` — 5000 sat escrow output, then spent
+- `https://test.whatsonchain.com/address/<seller-address>` — seller received 5000 sat
+
+Live refund is a **new** lock, not a replay of a completed escrow:
+
+```
+$env:FUNDING_WIF="..."
+$env:ESCROW_PATH="refund"
+$env:ESCROW_SATS="5000"
+npm run escrow
+```
+
+Refund sets the script locktime to one hour ago so it can broadcast in the same process. The buyer funding address needs confirmed tBSV for the locked amount plus lock fee plus complete/refund fee (default rate 1 sat/kB, a few satoshis). Optional: `ARC_URL`, `ARC_API_KEY`, `INDEXER_BASE_URL`.
 
 Do not reuse these WIFs on mainnet.
