@@ -4,6 +4,8 @@ import {
   AgentWallet,
   WhatsOnChainIndexer,
   createArcBroadcaster,
+  createWhatsOnChainBroadcaster,
+  DEFAULT_TESTNET_ARC_URL,
   HASH_MODE
 } from '../src'
 import { PrivateKey } from '@bsv/sdk'
@@ -11,14 +13,13 @@ import { PrivateKey } from '@bsv/sdk'
 async function main(): Promise<void> {
   const fundingWif = process.env.FUNDING_WIF
   const identityWif = process.env.IDENTITY_WIF
-  const arcUrl = process.env.ARC_URL
+  const arcUrl = process.env.ARC_URL ?? DEFAULT_TESTNET_ARC_URL
   const arcKey = process.env.ARC_API_KEY
   const indexerBase = process.env.INDEXER_BASE_URL ?? 'https://api.whatsonchain.com/v1/bsv/test'
+  const useWoc = (process.env.BROADCAST ?? 'arc').toLowerCase() === 'woc'
 
-  if (!fundingWif || !identityWif || !arcUrl) {
-    console.error(
-      'Set FUNDING_WIF, IDENTITY_WIF, and ARC_URL. Optional: ARC_API_KEY, INDEXER_BASE_URL.'
-    )
+  if (!fundingWif || !identityWif) {
+    console.error('Set FUNDING_WIF and IDENTITY_WIF. Optional: ARC_URL, ARC_API_KEY, BROADCAST=woc.')
     process.exit(1)
   }
 
@@ -26,7 +27,10 @@ async function main(): Promise<void> {
   const wallet = AgentWallet.fromWif(fundingWif, indexer, { network: 'testnet' })
   const identity = PrivateKey.fromWif(identityWif)
   const anchor = new AgentAnchor(wallet, identity)
-  const broadcaster = createArcBroadcaster(arcUrl, arcKey)
+  const broadcaster = useWoc
+    ? createWhatsOnChainBroadcaster('test')
+    : createArcBroadcaster(arcUrl, arcKey)
+  console.log('broadcast via', useWoc ? 'WhatsOnChain testnet' : arcUrl)
   const verifier = new AgentVerifier(indexer, 'testnet')
 
   console.log('funding address', wallet.address)

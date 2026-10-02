@@ -1,4 +1,4 @@
-import { ARC, type Transaction } from '@bsv/sdk'
+import { ARC, WhatsOnChainBroadcaster, isBroadcastFailure, type Transaction } from '@bsv/sdk'
 import type { ChainIndexer, TxBroadcaster, Utxo } from './network'
 import { DEFAULT_INDEXER_BASE_URL } from './protocol'
 
@@ -9,6 +9,8 @@ interface WoCUnspent {
   txid?: string
   outputIndex?: number
   satoshis?: number
+  height?: number
+  status?: string
 }
 
 function asList(data: unknown): WoCUnspent[] {
@@ -17,6 +19,10 @@ function asList(data: unknown): WoCUnspent[] {
     return (data as { result: WoCUnspent[] }).result
   }
   throw new Error('Unexpected UTXO response from indexer')
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 export class WhatsOnChainIndexer implements ChainIndexer {
@@ -28,25 +34,70 @@ export class WhatsOnChainIndexer implements ChainIndexer {
       throw new Error(`Indexer UTXO fetch failed: ${response.status} ${response.statusText}`)
     }
     const rows = asList(await response.json())
-    return rows.map((item) => ({
-      txid: item.tx_hash ?? item.txid ?? '',
-      outputIndex: item.tx_pos ?? item.outputIndex ?? 0,
-      satoshis: item.value ?? item.satoshis ?? 0
-    }))
+    const byOutpoint = new Map<string, Utxo>()
+    for (const item of rows) {
+      const txid = item.tx_hash ?? item.txid ?? ''
+      if (!txid) continue
+      const outputIndex = item.tx_pos ?? item.outputIndex ?? 0
+      const confirmed = item.status === 'confirmed' || (typeof item.height === 'number' && item.height > 0)
+      const key = `${txid}:${outputIndex}`
+      if (!byOutpoint.has(key) || confirmed) {
+        byOutpoint.set(key, {
+          txid,
+          outputIndex,
+          satoshis: item.value ?? item.satoshis ?? 0
+        })
+      }
+    }
+    return [...byOutpoint.values()]
   }
 
   async getRawTxHex(txid: string): Promise<string> {
-    const response = await fetch(`${this.baseUrl}/tx/${txid}/hex`)
-    if (!response.ok) {
-      throw new Error(`Indexer raw tx fetch failed: ${response.status} ${response.statusText}`)
+    const url = `${this.baseUrl}/tx/${txid}/hex`
+    let lastStatus = ''
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const response = await fetch(url)
+      if (response.ok) {
+        return (await response.text()).trim()
+      }
+      lastStatus = `${response.status} ${response.statusText}`
+      if (response.status !== 404) {
+        throw new Error(`Indexer raw tx fetch failed: ${lastStatus}`)
+      }
+      await sleep(1500)
     }
-    return (await response.text()).trim()
+    throw new Error(`Indexer raw tx fetch failed: ${lastStatus}`)
   }
 }
+
+/** Base URL only. @bsv/sdk posts to `{url}/v1/tx`. Do not append `/v1`. */
+export const DEFAULT_TESTNET_ARC_URL = 'https://testnet.arc.gorillapool.io'
 
 export function createArcBroadcaster(url: string, apiKey?: string): TxBroadcaster {
   const arc = apiKey ? new ARC(url, apiKey) : new ARC(url)
   return {
-    broadcast: (tx: Transaction) => arc.broadcast(tx)
+    async broadcast(tx: Transaction) {
+      const result = await arc.broadcast(tx)
+      if (
+        isBroadcastFailure(result) &&
+        result.code === 'ERR_INVALID_RESPONSE' &&
+        /competing/i.test(result.description)
+      ) {
+        return {
+          status: 'success',
+          txid: tx.id('hex'),
+          message: 'ARC accepted the tx; competingTxs field was ignored'
+        }
+      }
+      return result
+    }
+  }
+}
+
+/** No API key. Useful if an ARC host is down. */
+export function createWhatsOnChainBroadcaster(network: 'main' | 'test' = 'test'): TxBroadcaster {
+  const woc = new WhatsOnChainBroadcaster(network)
+  return {
+    broadcast: (tx: Transaction) => woc.broadcast(tx)
   }
 }

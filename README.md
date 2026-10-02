@@ -17,23 +17,44 @@ npm run build
 
 Keep two keys. The **funding** key pays fees. The **identity** key only signs the AIP trailer. Never derive the optional AES-256-GCM **data key** from either.
 
+Generate them in PowerShell from this folder (`cd C:\Users\mikec\agent-anchor-sdk`), then run `node`, paste:
+
+```js
+const { PrivateKey } = require('@bsv/sdk')
+const funding = PrivateKey.fromRandom()
+const identity = PrivateKey.fromRandom()
+console.log('FUNDING_WIF', funding.toWif())
+console.log('funding address', funding.toAddress('testnet'))
+console.log('IDENTITY_WIF', identity.toWif())
+console.log('identity address', identity.toAddress('testnet'))
+```
+
+Type `.exit` when done. Store the WIFs privately. Send tBSV only to the **funding address**.
+
 ## Testnet example
 
-Unit tests mock ARC and the indexer. The live script talks to the network:
+ARC is an HTTP API, not a website. Opening the host in a browser often shows `no matching operation was found`. That is normal.
+
+Default broadcast is GorillaPool testnet ARC (no API key): `https://testnet.arc.gorillapool.io`
+
+TAAL’s **API** (`https://arc-test.taal.com`) is up, but their **login dashboard** has been failing DNS (`platform.teranode.group`). Skip TAAL until that console works.
+
+PowerShell from this folder:
 
 ```
-set FUNDING_WIF=...
-set IDENTITY_WIF=...
-set ARC_URL=https://<your-testnet-arc-host>
-set ARC_API_KEY=...
+$env:FUNDING_WIF="..."
+$env:IDENTITY_WIF="..."
 npm run example
 ```
 
-Optional: `INDEXER_BASE_URL` (default `https://api.whatsonchain.com/v1/bsv/test`).
+Optional:
 
-Fund the printed funding address from a BSV testnet faucet (for example a public tBSV faucet). Get an ARC endpoint and API key from your ARC provider; do not assume `https://api.taal.com/arc` is testnet.
+- `ARC_URL` — default `https://testnet.arc.gorillapool.io` (no `/v1` suffix; the SDK adds `/v1/tx`)
+- `ARC_API_KEY` — only if the ARC host requires it
+- `BROADCAST=woc` — broadcast through WhatsOnChain instead of ARC
+- `INDEXER_BASE_URL` — default `https://api.whatsonchain.com/v1/bsv/test`
 
-The script anchors two linked records (`prevTxid` of the second is the first txid) and verifies both.
+Keep the quotes around the WIFs in PowerShell. After the faucet pays you, wait until `https://test.whatsonchain.com/address/<funding-address>` shows the coins (confirmed is more reliable than mempool-only). Then run `npm run example` again. Do not put the address in `FUNDING_WIF`.
 
 ## Scope
 
