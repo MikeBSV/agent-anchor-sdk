@@ -124,7 +124,11 @@ function decodeScriptNumber(bytes: number[]): number {
   return n
 }
 
-function scriptLocktime(script: LockingScript): number {
+export const UNIX_LOCKTIME_THRESHOLD = 500_000_000
+export const DEFAULT_ESCROW_LOCK_SECONDS = 7 * 24 * 60 * 60
+export const MAX_ESCROW_LOCK_SECONDS = 90 * 24 * 60 * 60
+
+export function escrowScriptLocktime(script: LockingScript): number {
   const elseIndex = script.chunks.findIndex((chunk) => chunk.op === OP.OP_ELSE)
   const lockChunk = script.chunks[elseIndex + 1]
   if (elseIndex < 0 || !lockChunk) {
@@ -138,6 +142,31 @@ function scriptLocktime(script: LockingScript): number {
     return lockChunk.op - OP.OP_1 + 1
   }
   throw new Error('Escrow script locktime is not a script number')
+}
+
+export function assertEscrowLocktimeNotExcessive(
+  locktime: number,
+  options?: { now?: number; allowLong?: boolean; maxSeconds?: number }
+): void {
+  if (options?.allowLong) return
+  const now = options?.now ?? Math.floor(Date.now() / 1000)
+  const maxSeconds = options?.maxSeconds ?? MAX_ESCROW_LOCK_SECONDS
+  if (locktime >= UNIX_LOCKTIME_THRESHOLD && locktime > now + maxSeconds) {
+    const days = maxSeconds / 86400
+    throw new Error(
+      `Escrow locktime is more than ${days} days from now. Set ESCROW_ALLOW_LONG_LOCK=1 to override.`
+    )
+  }
+}
+
+export function refundNLockTime(
+  scriptLocktime: number,
+  now = Math.floor(Date.now() / 1000)
+): number {
+  if (scriptLocktime >= UNIX_LOCKTIME_THRESHOLD) {
+    return Math.max(scriptLocktime, now)
+  }
+  return scriptLocktime
 }
 
 function assertSpendValid(tx: Transaction, inputIndex = 0): void {
@@ -264,7 +293,7 @@ export async function refundEscrow(
   broadcaster: TxBroadcaster
 ): Promise<EscrowSpendResult> {
   const source = await loadEscrowSource(buyerWallet, escrow.txid, escrow.outputIndex)
-  const requiredLocktime = scriptLocktime(source.outputs[escrow.outputIndex].lockingScript)
+  const requiredLocktime = escrowScriptLocktime(source.outputs[escrow.outputIndex].lockingScript)
   if (locktime < requiredLocktime) {
     throw new Error(
       `Refund nLockTime ${locktime} is before script locktime ${requiredLocktime}`

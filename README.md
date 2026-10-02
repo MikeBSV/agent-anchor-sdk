@@ -70,30 +70,59 @@ WIFs pasted in this chat or a terminal log are testnet-only. Do not reuse them o
 
 Two on-chain transactions:
 
-1. **Lock** — buyer P2PKH → escrow output of exactly `ESCROW_SATS`, plus change back to the buyer. WoC shows that output as `nonstandard` / ScriptHash.
+1. **Lock** — buyer P2PKH → escrow output of exactly `ESCROW_SATS`, plus change back to the buyer. WoC shows that output as `nonstandard` / ScriptHash. The script locktime is fixed at this moment (Unix time, or a block height if the number is below 500000000). After that time the buyer can refund; until then, if the seller will not sign, the coins wait.
 2. **Complete** — buyer and seller both sign (`SIGHASH_ALL`). The seller’s P2PKH receives **exactly** `ESCROW_SATS`. The complete fee is paid from the buyer’s change, not taken out of the seller’s payout.
-3. **Refund** (instead of complete) — after the script locktime, the buyer alone signs. `nLockTime` is set and the escrow input uses sequence `0xfffffffe`. The buyer receives exactly `ESCROW_SATS` back; the refund fee is also paid from their other coins.
+3. **Refund** — after the script locktime, the buyer broadcasts a refund (`nLockTime` set, escrow input sequence `0xfffffffe`). This does **not** happen by itself. The buyer receives exactly `ESCROW_SATS` back; the refund fee is paid from their other coins.
 
-`npm test` mocks those paths (lock, pay seller, seller-alone fails, early refund fails, on-time refund, second lock from local change).
+The live script prints `refund allowed after (unix)` and `(utc)` **before** it broadcasts the lock. Default locktime is **7 days** from now. Cap is **90 days** unless you set `ESCROW_ALLOW_LONG_LOCK=1` (the chain would otherwise accept a 100-year locktime). Set the window with `ESCROW_LOCK_HOURS` or an exact `ESCROW_LOCKTIME`.
+
+`npm test` mocks lock, pay seller, seller-alone fails, early refund fails, on-time refund, second lock from local change, and the 90-day cap.
 
 A run with only `FUNDING_WIF` still works: the script creates a **random seller in memory**, completes to that address, then exits. That address is real testnet P2PKH, but you cannot spend it unless you set `SELLER_WIF`. Use a seller WIF you keep when you want to open the seller on WhatsOnChain.
 
-Live complete (buyer you fund, seller you control):
+Lock then complete in one process (buyer you fund, seller you control):
 
 ```
 $env:FUNDING_WIF="..."
 $env:SELLER_WIF="..."
 $env:ESCROW_SATS="5000"
+$env:ESCROW_LOCK_HOURS="48"
 $env:SATOSHIS_PER_KB="1"
 npm run escrow
 ```
 
-It prints lock/complete txids, both fees (buyer), and `seller receives satoshis` (should match `ESCROW_SATS`). Check:
+Same path with an explicit Unix locktime instead of hours:
 
-- `https://test.whatsonchain.com/tx/<lock-txid>` — 5000 sat escrow output, then spent
-- `https://test.whatsonchain.com/address/<seller-address>` — seller received 5000 sat
+```
+$env:FUNDING_WIF="..."
+$env:SELLER_WIF="..."
+$env:ESCROW_SATS="5000"
+$env:ESCROW_LOCKTIME="1791570797"
+npm run escrow
+```
 
-Live refund is a **new** lock, not a replay of a completed escrow:
+Lock only (so you can wait, then complete in your own code or refund later). Save the printed `lock txid`, `lock vout`, and UTC refund time:
+
+```
+$env:FUNDING_WIF="..."
+$env:SELLER_WIF="..."
+$env:ESCROW_PATH="lock"
+$env:ESCROW_SATS="5000"
+$env:ESCROW_LOCK_HOURS="48"
+npm run escrow
+```
+
+Refund an **existing** lock after that time (does not create a new escrow):
+
+```
+$env:FUNDING_WIF="..."
+$env:ESCROW_PATH="refund-existing"
+$env:ESCROW_TXID="..."
+$env:ESCROW_VOUT="0"
+npm run escrow
+```
+
+Instant refund demo (new lock with locktime one hour ago, then refund in the same process):
 
 ```
 $env:FUNDING_WIF="..."
@@ -102,6 +131,6 @@ $env:ESCROW_SATS="5000"
 npm run escrow
 ```
 
-Refund sets the script locktime to one hour ago so it can broadcast in the same process. The buyer funding address needs confirmed tBSV for the locked amount plus lock fee plus complete/refund fee (default rate 1 sat/kB, a few satoshis). Optional: `ARC_URL`, `ARC_API_KEY`, `INDEXER_BASE_URL`.
+The buyer funding address needs confirmed tBSV for the locked amount plus lock fee plus complete/refund fee (default rate 1 sat/kB). Optional: `ARC_URL`, `ARC_API_KEY`, `INDEXER_BASE_URL`, `ESCROW_ALLOW_LONG_LOCK=1`.
 
 Do not reuse these WIFs on mainnet.

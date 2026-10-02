@@ -2,8 +2,11 @@ import { OP, P2PKH, PrivateKey } from '@bsv/sdk'
 import {
   buildEscrowScript,
   completeEscrow,
+  escrowScriptLocktime,
   lockEscrow,
-  refundEscrow
+  refundEscrow,
+  assertEscrowLocktimeNotExcessive,
+  MAX_ESCROW_LOCK_SECONDS
 } from '../src/escrow'
 import { fundedWallet, MemoryBroadcaster } from './helpers'
 
@@ -105,5 +108,17 @@ describe('escrow', () => {
     expect(ops).toContain(OP.OP_ELSE)
     expect(ops).toContain(OP.OP_CHECKMULTISIG)
     expect(ops).toContain(OP.OP_CHECKLOCKTIMEVERIFY)
+    expect(escrowScriptLocktime(script)).toBe(LOCKTIME)
+  })
+
+  it('rejects a unix locktime more than 90 days ahead unless allowLong is set', () => {
+    const now = 1_800_000_000
+    expect(() =>
+      assertEscrowLocktimeNotExcessive(now + MAX_ESCROW_LOCK_SECONDS + 1, { now })
+    ).toThrow(/more than 90 days/)
+    expect(() =>
+      assertEscrowLocktimeNotExcessive(now + MAX_ESCROW_LOCK_SECONDS + 1, { now, allowLong: true })
+    ).not.toThrow()
+    expect(() => assertEscrowLocktimeNotExcessive(LOCKTIME, { now })).not.toThrow()
   })
 })
