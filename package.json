@@ -1,0 +1,27 @@
+{
+  "name": "agent-anchor-sdk",
+  "version": "0.1.0",
+  "description": "Signed AI-agent audit records anchored on BSV testnet",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "jest",
+    "example": "npx ts-node --transpile-only scripts/anchor-two-records.ts"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@bsv/sdk": "2.8.11"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/node": "^26.6.4",
+    "jest": "^30.5.2",
+    "ts-jest": "^29.4.14",
+    "ts-node": "^10.9.2",
+    "typescript": "5.9.3"
+  }
+}
