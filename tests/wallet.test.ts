@@ -22,4 +22,15 @@ describe('AgentWallet', () => {
       /Insufficient funds/
     )
   })
+
+  it('spends change from the previous broadcast when the indexer is stale', async () => {
+    const { wallet, indexer } = fundedWallet(50_000)
+    const broadcaster = new MemoryBroadcaster()
+    const first = await wallet.payP2pkh(wallet.address, 1_000, broadcaster)
+    expect(first).toHaveLength(64)
+    indexer.txs.set(first, broadcaster.lastTx!.toHex())
+    const second = await wallet.payP2pkh(wallet.address, 1_000, broadcaster)
+    expect(second).toHaveLength(64)
+    expect(second).not.toBe(first)
+  })
 })

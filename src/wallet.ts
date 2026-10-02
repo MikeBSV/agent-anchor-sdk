@@ -9,10 +9,17 @@ import { DEFAULT_SATOSHIS_PER_KB, type ChainIndexer, type TxBroadcaster, type Ut
 
 export type NetworkName = 'testnet' | 'mainnet'
 
+function outpointKey(txid: string, outputIndex: number): string {
+  return `${txid}:${outputIndex}`
+}
+
 export class AgentWallet {
   readonly fundingKey: PrivateKey
   readonly network: NetworkName
   readonly satoshisPerKb: number
+  private readonly spent = new Set<string>()
+  private readonly localUtxos = new Map<string, Utxo>()
+  private readonly localTxHex = new Map<string, string>()
 
   constructor(
     fundingKey: PrivateKey,
@@ -43,8 +50,21 @@ export class AgentWallet {
     return this.fundingKey.toAddress(this.network)
   }
 
+  private get p2pkhHex(): string {
+    return new P2PKH().lock(this.address).toHex()
+  }
+
   async listUtxos(): Promise<Utxo[]> {
-    return this.indexer.getUtxos(this.address)
+    const remote = await this.indexer.getUtxos(this.address)
+    const merged = new Map<string, Utxo>()
+    for (const utxo of remote) {
+      const key = outpointKey(utxo.txid, utxo.outputIndex)
+      if (!this.spent.has(key)) merged.set(key, utxo)
+    }
+    for (const [key, utxo] of this.localUtxos) {
+      if (!this.spent.has(key)) merged.set(key, utxo)
+    }
+    return [...merged.values()]
   }
 
   async selectUtxos(neededSatoshis: number): Promise<Utxo[]> {
@@ -63,7 +83,7 @@ export class AgentWallet {
 
   async addFundingInputs(tx: Transaction, selected: Utxo[]): Promise<void> {
     for (const utxo of selected) {
-      const hex = await this.indexer.getRawTxHex(utxo.txid)
+      const hex = this.localTxHex.get(utxo.txid) ?? (await this.indexer.getRawTxHex(utxo.txid))
       tx.addInput({
         sourceTransaction: Transaction.fromHex(hex),
         sourceOutputIndex: utxo.outputIndex,
@@ -107,6 +127,28 @@ export class AgentWallet {
     if (isBroadcastFailure(result)) {
       throw new Error(`Broadcast failed: ${result.code} ${result.description}`)
     }
+    this.noteBroadcast(tx, result.txid)
     return result.txid
+  }
+
+  /** Remember spends and change so the next tx does not wait on a stale indexer. */
+  private noteBroadcast(tx: Transaction, txid: string): void {
+    this.localTxHex.set(txid, tx.toHex())
+    for (const input of tx.inputs) {
+      const sourceId =
+        input.sourceTXID ??
+        (input.sourceTransaction ? input.sourceTransaction.id('hex') : undefined)
+      if (sourceId === undefined) continue
+      const key = outpointKey(sourceId, input.sourceOutputIndex)
+      this.spent.add(key)
+      this.localUtxos.delete(key)
+    }
+    const ours = this.p2pkhHex
+    tx.outputs.forEach((output, outputIndex) => {
+      if (!output.satoshis || output.satoshis <= 0) return
+      if (output.lockingScript.toHex() !== ours) return
+      const key = outpointKey(txid, outputIndex)
+      this.localUtxos.set(key, { txid, outputIndex, satoshis: output.satoshis })
+    })
   }
 }

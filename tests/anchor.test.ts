@@ -45,21 +45,13 @@ describe('anchor and verify', () => {
     expect(tampered.reason).toMatch(/hash mismatch/)
   })
 
-  it('chains prevTxid on a second record', async () => {
+  it('chains prevTxid on a second record without an indexer UTXO refresh', async () => {
     const { wallet, indexer, identityKey } = fundedWallet()
     const anchor = new AgentAnchor(wallet, identityKey)
     const broadcaster = new MemoryBroadcaster()
     const a = new TextEncoder().encode('a')
     const first = await anchor.anchor({ sessionId: 's1', sequence: 1, content: a }, broadcaster)
     indexer.txs.set(first.txid, broadcaster.lastTx!.toHex())
-    const change = broadcaster.lastTx!.outputs.find((o) => (o.satoshis ?? 0) > 0)!
-    indexer.utxos = [
-      {
-        txid: first.txid,
-        outputIndex: broadcaster.lastTx!.outputs.indexOf(change),
-        satoshis: change.satoshis!
-      }
-    ]
     const b = new TextEncoder().encode('b')
     const second = await anchor.anchor(
       { sessionId: 's1', sequence: 2, prevTxid: first.txid, content: b },
