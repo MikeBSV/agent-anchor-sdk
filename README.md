@@ -1,14 +1,15 @@
 # agent-anchor-sdk
 
-TypeScript SDK that writes signed AI-agent audit records to **BSV testnet**. A later check can prove the recorded bytes were not edited. It does not stop an agent from anchoring a false record.
+TypeScript SDK for **BSV testnet**: signed AI-agent audit records, plus native 2-of-2 escrow with a timed buyer refund. A later check can prove anchored bytes were not edited. It does not prove the agent told the truth.
 
-Wire format: [PROTOCOL.md](PROTOCOL.md).
+Wire format: [PROTOCOL.md](PROTOCOL.md). License: [MIT](LICENSE).
 
 ## Install
 
-Node 22+. Dependencies are pinned; `@bsv/sdk` is **2.8.11**.
+Node 22+. `@bsv/sdk` is pinned at **2.8.11**.
 
 ```
+npm install
 npm test
 npm run build
 ```
@@ -17,7 +18,7 @@ npm run build
 
 Keep two keys. The **funding** key pays fees. The **identity** key only signs the AIP trailer. Never derive the optional AES-256-GCM **data key** from either.
 
-Generate them in PowerShell from this folder (`cd C:\Users\mikec\agent-anchor-sdk`), then run `node`, paste:
+From the repo folder, run `node` and paste:
 
 ```js
 const { PrivateKey } = require('@bsv/sdk')
@@ -32,16 +33,16 @@ console.log('SELLER_WIF', seller.toWif())
 console.log('seller address', seller.toAddress('testnet'))
 ```
 
-Type `.exit` when done. Store the WIFs privately. Send tBSV only to the **funding address**. The seller address does not need a faucet for these tests.
+Type `.exit` when done. Send tBSV only to the **funding address**. The seller does not need a faucet. Testnet WIFs must not be reused on mainnet.
 
 ## Storage (`hash` vs `cipher`)
 
-The protocol is a signed receipt that these **bytes** existed. File format and compression are up to you (JSON, zip, PDF, gzip-then-JSON, and so on). Compress first if you want, then pass that `Uint8Array` as `content`. A verifier must be given the **same** bytes.
+The protocol is a signed receipt that these **bytes** existed. File format and compression are up to you. Compress first if you want, then pass that `Uint8Array` as `content`. A verifier must use the **same** bytes.
 
-| Mode | What goes on-chain | Who picks the file format |
+| Mode | What goes on-chain | File format |
 |---|---|---|
-| **`hash` (default)** | 32-byte SHA-256 only. Plaintext stays off-chain. | Fully yours: any format, any compression, any store. Proof is “here are the bytes; they match the hash.” |
-| **`cipher`** | AES-256-GCM ciphertext (12-byte nonce, 16-byte tag appended), plus SHA-256 of that ciphertext. Cap **100,000** bytes so WhatsOnChain does not truncate. | Layout inside the plaintext is still yours, but the envelope is this SDK’s AES-256-GCM and a **separate 32-byte data key** (never funding or identity). |
+| **`hash` (default)** | 32-byte SHA-256. Plaintext stays off-chain. | Yours. Proof is that the bytes match the hash. |
+| **`cipher`** | AES-256-GCM (12-byte nonce, 16-byte tag appended) plus SHA-256 of that ciphertext. Cap **100,000** bytes. | Layout inside the plaintext is yours. The envelope is this SDK’s AES-256-GCM and a **separate 32-byte data key** (not funding or identity). |
 
 `npm run example` uses hash mode. Cipher:
 
@@ -61,21 +62,14 @@ await anchor.anchor(
   broadcaster
 )
 
-// later, from the on-chain record:
 const plain = decryptPayload(record.ciphertext, record.nonce, dataKey)
 ```
 
-Field-level wire format: [PROTOCOL.md](PROTOCOL.md).
+## Anchor example
 
-## Testnet example
+Default broadcast is GorillaPool testnet ARC (no API key): `https://testnet.arc.gorillapool.io`. ARC is an HTTP API. Opening that host in a browser often shows `no matching operation was found`; that is normal.
 
-ARC is an HTTP API, not a website. Opening the host in a browser often shows `no matching operation was found`. That is normal.
-
-Default broadcast is GorillaPool testnet ARC (no API key): `https://testnet.arc.gorillapool.io`
-
-TAAL’s **API** (`https://arc-test.taal.com`) is up, but their **login dashboard** has been failing DNS (`platform.teranode.group`). Skip TAAL until that console works.
-
-PowerShell from this folder:
+PowerShell (keep quotes around WIFs):
 
 ```
 $env:FUNDING_WIF="..."
@@ -83,37 +77,29 @@ $env:IDENTITY_WIF="..."
 npm run example
 ```
 
-Optional:
+Optional: `ARC_URL` (no `/v1` suffix; the SDK posts to `/v1/tx`), `ARC_API_KEY`, `INDEXER_BASE_URL` (default `https://api.whatsonchain.com/v1/bsv/test`).
 
-- `ARC_URL` — default `https://testnet.arc.gorillapool.io` (no `/v1` suffix; the SDK adds `/v1/tx`)
-- `ARC_API_KEY` — only if the ARC host requires it
-- `INDEXER_BASE_URL` — default `https://api.whatsonchain.com/v1/bsv/test`
+Do not put the funding **address** in `FUNDING_WIF`. After a faucet payment, wait until `https://test.whatsonchain.com/address/<funding-address>` shows the coins (confirmed is more reliable than mempool-only), then run the example.
 
-Keep the quotes around the WIFs in PowerShell. After the faucet pays you, wait until `https://test.whatsonchain.com/address/<funding-address>` shows the coins (confirmed is more reliable than mempool-only). Then run `npm run example` again. Do not put the address in `FUNDING_WIF`.
-
-The example broadcasts two linked records in one process. The wallet remembers the first spend and its change so the second record does not double-spend a stale indexer UTXO. If a previous run already spent your faucet coin and that tx is still in the mempool, wait for it to confirm (or for its change to appear) before running the example again.
-
-WIFs pasted in this chat or a terminal log are testnet-only. Do not reuse them on mainnet.
+The example broadcasts two linked records in one process. The wallet remembers the first spend and its change so the second record does not double-spend a stale indexer UTXO. If a previous run already spent your faucet coin, wait for that tx to confirm (or for its change to appear) before running again.
 
 ## Escrow
 
-`lockEscrow` / `completeEscrow` / `refundEscrow` lock satoshis in a native Bitcoin script (no sCrypt). This package is testnet-only. The script only sees two Bitcoin keys: two humans, two agents, or a human paying an agent all work the same.
+`lockEscrow` / `completeEscrow` / `refundEscrow` lock satoshis in a native Bitcoin script (no sCrypt). Testnet only. Two keys only: humans, agents, or mixed.
 
-`FUNDING_WIF` is the **buyer**. They lock coins, pay both transaction fees, and later either pay the seller or refund themselves. The **seller** only needs a key (and, on complete, to sign). `IDENTITY_WIF` is not used here.
+`FUNDING_WIF` is the **buyer** (locks coins, pays both fees). The **seller** only needs a key and, on complete, a signature. `IDENTITY_WIF` is unused here.
 
-Two on-chain transactions:
+1. **Lock** — buyer P2PKH → escrow of exactly `ESCROW_SATS`, plus change to the buyer. WhatsOnChain shows that output as `nonstandard`. Locktime is fixed then (Unix time, or block height if the number is below 500000000).
+2. **Complete** — both parties sign. The seller receives **exactly** `ESCROW_SATS`. Fees come from the buyer’s change.
+3. **Refund** — after locktime the **buyer** must broadcast a refund. Nothing refunds by itself. If the seller will not sign, the coins wait until then.
 
-1. **Lock** — buyer P2PKH → escrow output of exactly `ESCROW_SATS`, plus change back to the buyer. WoC shows that output as `nonstandard` / ScriptHash. The script locktime is fixed at this moment (Unix time, or a block height if the number is below 500000000). After that time the buyer can refund; until then, if the seller will not sign, the coins wait.
-2. **Complete** — buyer and seller both sign (`SIGHASH_ALL`). The seller’s P2PKH receives **exactly** `ESCROW_SATS`. The complete fee is paid from the buyer’s change, not taken out of the seller’s payout.
-3. **Refund** — after the script locktime, the buyer broadcasts a refund (`nLockTime` set, escrow input sequence `0xfffffffe`). This does **not** happen by itself. The buyer receives exactly `ESCROW_SATS` back; the refund fee is paid from their other coins.
+The script prints `refund allowed after (unix)` and `(utc)` before it locks. Default window is **7 days**; **90 days** max unless `ESCROW_ALLOW_LONG_LOCK=1`. Set `ESCROW_LOCK_HOURS` or `ESCROW_LOCKTIME` (Unix time or height).
 
-The live script prints `refund allowed after (unix)` and `(utc)` **before** it broadcasts the lock. Default locktime is **7 days** from now. Cap is **90 days** unless you set `ESCROW_ALLOW_LONG_LOCK=1` (the chain would otherwise accept a 100-year locktime). Set the window with `ESCROW_LOCK_HOURS` or an exact `ESCROW_LOCKTIME`.
+`npm test` covers these paths with a mock indexer (no network).
 
-`npm test` mocks lock, pay seller, seller-alone fails, early refund fails, on-time refund, second lock from local change, and the 90-day cap.
+A run with only `FUNDING_WIF` creates a **random seller in memory**. That is a real testnet address, but you cannot spend it later. Set `SELLER_WIF` if you want to control the seller.
 
-A run with only `FUNDING_WIF` still works: the script creates a **random seller in memory**, completes to that address, then exits. That address is real testnet P2PKH, but you cannot spend it unless you set `SELLER_WIF`. Use a seller WIF you keep when you want to open the seller on WhatsOnChain.
-
-Lock then complete in one process (buyer you fund, seller you control):
+Lock then complete:
 
 ```
 $env:FUNDING_WIF="..."
@@ -124,17 +110,7 @@ $env:SATOSHIS_PER_KB="1"
 npm run escrow
 ```
 
-Same path with an explicit Unix locktime instead of hours:
-
-```
-$env:FUNDING_WIF="..."
-$env:SELLER_WIF="..."
-$env:ESCROW_SATS="5000"
-$env:ESCROW_LOCKTIME="1791570797"
-npm run escrow
-```
-
-Lock only (so you can wait, then complete in your own code or refund later). Save the printed `lock txid`, `lock vout`, and UTC refund time:
+Lock only (save `lock txid`, `lock vout`, and the UTC refund time):
 
 ```
 $env:FUNDING_WIF="..."
@@ -145,7 +121,7 @@ $env:ESCROW_LOCK_HOURS="48"
 npm run escrow
 ```
 
-Refund an **existing** lock after that time (does not create a new escrow):
+Refund that lock after the printed time:
 
 ```
 $env:FUNDING_WIF="..."
@@ -155,7 +131,7 @@ $env:ESCROW_VOUT="0"
 npm run escrow
 ```
 
-Instant refund demo (new lock with locktime one hour ago, then refund in the same process):
+Instant refund demo (new lock already past locktime):
 
 ```
 $env:FUNDING_WIF="..."
@@ -164,6 +140,4 @@ $env:ESCROW_SATS="5000"
 npm run escrow
 ```
 
-The buyer funding address needs confirmed tBSV for the locked amount plus lock fee plus complete/refund fee (default rate 1 sat/kB). Optional: `ARC_URL`, `ARC_API_KEY`, `INDEXER_BASE_URL`, `ESCROW_ALLOW_LONG_LOCK=1`.
-
-Do not reuse these WIFs on mainnet.
+The buyer needs confirmed tBSV for the locked amount plus lock and complete/refund fees (default 1 sat/kB). Same optional `ARC_URL` / `ARC_API_KEY` / `INDEXER_BASE_URL` as the anchor example.
