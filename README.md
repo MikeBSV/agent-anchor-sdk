@@ -44,28 +44,9 @@ The protocol is a signed receipt that these **bytes** existed. File format and c
 | **`hash` (default)** | 32-byte SHA-256. Plaintext stays off-chain. | Yours. Proof is that the bytes match the hash. |
 | **`cipher`** | AES-256-GCM (12-byte nonce, 16-byte tag appended) plus SHA-256 of that ciphertext. Cap **100,000** bytes. | Layout inside the plaintext is yours. The envelope is this SDK’s AES-256-GCM and a **separate 32-byte data key** (not funding or identity). |
 
-`npm run example` uses hash mode. Cipher:
+`npm run example` uses hash mode (plaintext stays off-chain). Cipher is `npm run cipher` below.
 
-```js
-const { Random } = require('@bsv/sdk')
-const { CIPHER_MODE, decryptPayload } = require('./dist')
-
-const dataKey = Uint8Array.from(Random(32)) // store off-chain; the SDK does not keep it
-await anchor.anchor(
-  {
-    sessionId: 'job-1',
-    sequence: 1,
-    content: new TextEncoder().encode('whatever file bytes'),
-    mode: CIPHER_MODE,
-    dataKey
-  },
-  broadcaster
-)
-
-const plain = decryptPayload(record.ciphertext, record.nonce, dataKey)
-```
-
-## Anchor example
+## Anchor example (hash)
 
 Default broadcast is GorillaPool testnet ARC (no API key): `https://testnet.arc.gorillapool.io`. ARC is an HTTP API. Opening that host in a browser often shows `no matching operation was found`; that is normal.
 
@@ -77,11 +58,36 @@ $env:IDENTITY_WIF="..."
 npm run example
 ```
 
+That broadcasts two linked **hash** records and verifies each against the original plaintext.
+
 Optional: `ARC_URL` (no `/v1` suffix; the SDK posts to `/v1/tx`), `ARC_API_KEY`, `INDEXER_BASE_URL` (default `https://api.whatsonchain.com/v1/bsv/test`).
 
 Do not put the funding **address** in `FUNDING_WIF`. After a faucet payment, wait until `https://test.whatsonchain.com/address/<funding-address>` shows the coins (confirmed is more reliable than mempool-only), then run the example.
 
-The example broadcasts two linked records in one process. The wallet remembers the first spend and its change so the second record does not double-spend a stale indexer UTXO. If a previous run already spent your faucet coin, wait for that tx to confirm (or for its change to appear) before running again.
+The wallet remembers the first spend and its change so the second record does not double-spend a stale indexer UTXO. If a previous run already spent your faucet coin, wait for that tx to confirm (or for its change to appear) before running again.
+
+## Cipher example
+
+Encrypts UTF-8 with AES-256-GCM, anchors the ciphertext, verifies the on-chain blob (AIP + hash of ciphertext — this step does **not** decrypt), then decrypts with the data key.
+
+```
+$env:FUNDING_WIF="..."
+$env:IDENTITY_WIF="..."
+$env:CIPHER_TEXT="cipher demo secret"
+npm run cipher
+```
+
+Save the printed `dataKey hex`. Without it you cannot decrypt later. Optional: `DATA_KEY_HEX` (64 hex chars) to reuse a key; otherwise the script generates one. WhatsOnChain will show OP_RETURN, not the plaintext.
+
+Verify and decrypt that tx again (no new broadcast):
+
+```
+$env:CIPHER_TXID="..."
+$env:DATA_KEY_HEX="..."
+npm run cipher
+```
+
+`npm test` already round-trips encrypt/decrypt with a mock indexer if you do not want to spend testnet fees.
 
 ## Escrow
 

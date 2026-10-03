@@ -8,6 +8,7 @@
     "build": "tsc",
     "test": "jest",
     "example": "npx ts-node --transpile-only scripts/anchor-two-records.ts",
+    "cipher": "npx ts-node --transpile-only scripts/anchor-cipher.ts",
     "escrow": "npx ts-node --transpile-only scripts/escrow-testnet.ts"
   },
   "license": "MIT",
