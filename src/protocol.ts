@@ -21,6 +21,8 @@ export const MAX_CIPHERTEXT_BYTES = 100_000
 
 export const DEFAULT_INDEXER_BASE_URL = 'https://api.whatsonchain.com/v1/bsv/test'
 
+export const DEFAULT_MAINNET_INDEXER_BASE_URL = 'https://api.whatsonchain.com/v1/bsv/main'
+
 export type AnchorMode = 'hash' | 'cipher'
 
 export const HASH_MODE: AnchorMode = 'hash'

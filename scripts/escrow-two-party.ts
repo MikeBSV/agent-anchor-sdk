@@ -2,7 +2,6 @@ import { PrivateKey } from '@bsv/sdk'
 import {
   AgentWallet,
   DEFAULT_ESCROW_LOCK_SECONDS,
-  DEFAULT_TESTNET_ARC_URL,
   MAX_ESCROW_LOCK_SECONDS,
   WhatsOnChainIndexer,
   assertEscrowLocktimeNotExcessive,
@@ -10,6 +9,7 @@ import {
   buildCompleteEscrow,
   createArcBroadcaster,
   inspectCompleteOffer,
+  loadChainEnv,
   lockEscrow,
   signCompleteEscrow
 } from '../src'
@@ -31,24 +31,28 @@ async function main(): Promise<void> {
   const satoshis = envInt('ESCROW_SATS', 5_000)
   const satoshisPerKb = envInt('SATOSHIS_PER_KB', 1)
   const allowLong = process.env.ESCROW_ALLOW_LONG_LOCK === '1'
-  const arcUrl = process.env.ARC_URL ?? DEFAULT_TESTNET_ARC_URL
+  const chain = loadChainEnv()
   const arcKey = process.env.ARC_API_KEY
-  const indexerBase = process.env.INDEXER_BASE_URL ?? 'https://api.whatsonchain.com/v1/bsv/test'
 
   if (!fundingWif || !sellerWif) {
-    console.error('Set FUNDING_WIF (buyer) and SELLER_WIF. Optional: FEE_PAYER=buyer|seller, ESCROW_SATS, ESCROW_LOCK_HOURS.')
+    console.error(
+      'Set FUNDING_WIF (buyer) and SELLER_WIF. Optional: NETWORK=mainnet, FEE_PAYER=buyer|seller, ESCROW_SATS, ESCROW_LOCK_HOURS.'
+    )
     process.exit(1)
   }
   if (feePayer !== 'buyer' && feePayer !== 'seller') {
     throw new Error('FEE_PAYER must be buyer or seller')
   }
+  if (chain.network === 'mainnet') {
+    console.warn('NETWORK=mainnet spends real BSV. Do not reuse testnet keys.')
+  }
 
-  const indexer = new WhatsOnChainIndexer(indexerBase)
-  const buyer = AgentWallet.fromWif(fundingWif, indexer, { network: 'testnet', satoshisPerKb })
+  const indexer = new WhatsOnChainIndexer(chain.indexerBase)
+  const buyer = AgentWallet.fromWif(fundingWif, indexer, { network: chain.network, satoshisPerKb })
   const sellerKey = PrivateKey.fromWif(sellerWif)
-  const seller = new AgentWallet(sellerKey, indexer, { network: 'testnet', satoshisPerKb })
+  const seller = new AgentWallet(sellerKey, indexer, { network: chain.network, satoshisPerKb })
   const sellerAddress = seller.address
-  const broadcaster = createArcBroadcaster(arcUrl, arcKey)
+  const broadcaster = createArcBroadcaster(chain.arcUrl, arcKey)
   const now = Math.floor(Date.now() / 1000)
   const hours = process.env.ESCROW_LOCK_HOURS
   const locktime = hours
@@ -58,7 +62,8 @@ async function main(): Promise<void> {
 
   const feeWallet = feePayer === 'seller' ? seller : buyer
 
-  console.log('broadcast via', arcUrl)
+  console.log('network', chain.network)
+  console.log('broadcast via', chain.arcUrl)
   console.log('buyer address', buyer.address)
   console.log('seller address', sellerAddress)
   console.log('complete fee payer', feePayer)
@@ -68,7 +73,7 @@ async function main(): Promise<void> {
   const locked = await lockEscrow(buyer, sellerKey.toPublicKey(), satoshis, locktime, broadcaster)
   console.log('lock txid', locked.txid)
   console.log('lock vout', locked.outputIndex)
-  console.log('lock url', `https://test.whatsonchain.com/tx/${locked.txid}`)
+  console.log('lock url', `${chain.explorerOrigin}/tx/${locked.txid}`)
 
   let offer = await buildCompleteEscrow({
     escrow: locked,
@@ -86,8 +91,8 @@ async function main(): Promise<void> {
   console.log('complete txid', paid.txid)
   console.log('seller receives satoshis', paid.paidSatoshis)
   console.log('complete fee satoshis', paid.feeSatoshis)
-  console.log('complete url', `https://test.whatsonchain.com/tx/${paid.txid}`)
-  console.log('seller url', `https://test.whatsonchain.com/address/${sellerAddress}`)
+  console.log('complete url', `${chain.explorerOrigin}/tx/${paid.txid}`)
+  console.log('seller url', `${chain.explorerOrigin}/address/${sellerAddress}`)
 }
 
 main().catch((err) => {

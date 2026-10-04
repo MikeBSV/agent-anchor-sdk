@@ -2,7 +2,6 @@ import { PrivateKey, Transaction } from '@bsv/sdk'
 import {
   AgentWallet,
   DEFAULT_ESCROW_LOCK_SECONDS,
-  DEFAULT_TESTNET_ARC_URL,
   MAX_ESCROW_LOCK_SECONDS,
   UNIX_LOCKTIME_THRESHOLD,
   WhatsOnChainIndexer,
@@ -10,6 +9,7 @@ import {
   completeEscrow,
   createArcBroadcaster,
   escrowScriptLocktime,
+  loadChainEnv,
   lockEscrow,
   refundEscrow,
   refundNLockTime
@@ -65,29 +65,32 @@ async function main(): Promise<void> {
   const satoshis = envInt('ESCROW_SATS', 5_000)
   const satoshisPerKb = envInt('SATOSHIS_PER_KB', 1)
   const allowLong = process.env.ESCROW_ALLOW_LONG_LOCK === '1'
-  const arcUrl = process.env.ARC_URL ?? DEFAULT_TESTNET_ARC_URL
+  const chain = loadChainEnv()
   const arcKey = process.env.ARC_API_KEY
-  const indexerBase = process.env.INDEXER_BASE_URL ?? 'https://api.whatsonchain.com/v1/bsv/test'
 
   if (!fundingWif) {
     console.error(
-      'Set FUNDING_WIF. ESCROW_PATH=complete|lock|refund|refund-existing. Optional: SELLER_WIF, ESCROW_SATS, ESCROW_LOCK_HOURS, ESCROW_LOCKTIME, ESCROW_ALLOW_LONG_LOCK=1, SATOSHIS_PER_KB, ARC_URL, ARC_API_KEY.'
+      'Set FUNDING_WIF. ESCROW_PATH=complete|lock|refund|refund-existing. Optional: NETWORK=mainnet, SELLER_WIF, ESCROW_SATS, ESCROW_LOCK_HOURS, ESCROW_LOCKTIME, ESCROW_ALLOW_LONG_LOCK=1, SATOSHIS_PER_KB, ARC_URL, ARC_API_KEY.'
     )
     process.exit(1)
   }
   if (!PATHS.includes(path)) {
     throw new Error(`ESCROW_PATH must be one of ${PATHS.join(', ')}`)
   }
+  if (chain.network === 'mainnet') {
+    console.warn('NETWORK=mainnet spends real BSV. Do not reuse testnet keys.')
+  }
 
-  const indexer = new WhatsOnChainIndexer(indexerBase)
+  const indexer = new WhatsOnChainIndexer(chain.indexerBase)
   const buyerWallet = AgentWallet.fromWif(fundingWif, indexer, {
-    network: 'testnet',
+    network: chain.network,
     satoshisPerKb
   })
-  const broadcaster = createArcBroadcaster(arcUrl, arcKey)
+  const broadcaster = createArcBroadcaster(chain.arcUrl, arcKey)
   const now = Math.floor(Date.now() / 1000)
 
-  console.log('broadcast via', arcUrl)
+  console.log('network', chain.network)
+  console.log('broadcast via', chain.arcUrl)
   console.log('buyer address', buyerWallet.address)
   console.log('path', path)
   console.log('fee rate sat/kB', satoshisPerKb)
@@ -112,12 +115,12 @@ async function main(): Promise<void> {
     console.log('refund txid', refunded.txid)
     console.log('buyer receives satoshis', refunded.paidSatoshis)
     console.log('refund fee satoshis (buyer)', refunded.feeSatoshis)
-    console.log('refund url', `https://test.whatsonchain.com/tx/${refunded.txid}`)
+    console.log('refund url', `${chain.explorerOrigin}/tx/${refunded.txid}`)
     return
   }
 
   const seller = sellerWif ? PrivateKey.fromWif(sellerWif) : PrivateKey.fromRandom()
-  const sellerAddress = seller.toAddress('testnet')
+  const sellerAddress = seller.toAddress(chain.network)
   const locktime = chooseLocktime(path, now, allowLong)
   console.log('seller address', sellerAddress)
   if (!sellerWif) {
@@ -136,7 +139,7 @@ async function main(): Promise<void> {
   console.log('lock txid', locked.txid)
   console.log('lock vout', locked.outputIndex)
   console.log('lock fee satoshis (buyer)', locked.feeSatoshis)
-  console.log('lock url', `https://test.whatsonchain.com/tx/${locked.txid}`)
+  console.log('lock url', `${chain.explorerOrigin}/tx/${locked.txid}`)
 
   if (path === 'lock') {
     console.log('locked only; complete later or refund-existing after the locktime above')
@@ -155,7 +158,7 @@ async function main(): Promise<void> {
     console.log('complete txid', paid.txid)
     console.log('seller receives satoshis', paid.paidSatoshis)
     console.log('complete fee satoshis (buyer)', paid.feeSatoshis)
-    console.log('complete url', `https://test.whatsonchain.com/tx/${paid.txid}`)
+    console.log('complete url', `${chain.explorerOrigin}/tx/${paid.txid}`)
     return
   }
 
@@ -163,7 +166,7 @@ async function main(): Promise<void> {
   console.log('refund txid', refunded.txid)
   console.log('buyer receives satoshis', refunded.paidSatoshis)
   console.log('refund fee satoshis (buyer)', refunded.feeSatoshis)
-  console.log('refund url', `https://test.whatsonchain.com/tx/${refunded.txid}`)
+  console.log('refund url', `${chain.explorerOrigin}/tx/${refunded.txid}`)
 }
 
 main().catch((err) => {

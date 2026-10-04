@@ -1,7 +1,7 @@
 {
   "name": "agent-anchor-sdk",
   "version": "0.1.0",
-  "description": "Signed AI-agent audit records anchored on BSV testnet",
+  "description": "Signed AI-agent audit records and native 2-of-2 escrow on BSV (testnet default, mainnet opt-in)",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {

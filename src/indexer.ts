@@ -1,6 +1,7 @@
 import { ARC, WhatsOnChainBroadcaster, isBroadcastFailure, type Transaction } from '@bsv/sdk'
-import type { ChainIndexer, TxBroadcaster, Utxo } from './network'
-import { DEFAULT_INDEXER_BASE_URL } from './protocol'
+import type { BsvNetwork, ChainIndexer, TxBroadcaster, Utxo } from './network'
+import { parseBsvNetwork } from './network'
+import { DEFAULT_INDEXER_BASE_URL, DEFAULT_MAINNET_INDEXER_BASE_URL } from './protocol'
 
 interface WoCUnspent {
   tx_hash?: string
@@ -72,6 +73,37 @@ export class WhatsOnChainIndexer implements ChainIndexer {
 
 /** Base URL only. @bsv/sdk posts to `{url}/v1/tx`. Do not append `/v1`. */
 export const DEFAULT_TESTNET_ARC_URL = 'https://testnet.arc.gorillapool.io'
+
+export const DEFAULT_MAINNET_ARC_URL = 'https://arc.gorillapool.io'
+
+export function defaultArcUrl(network: BsvNetwork): string {
+  return network === 'mainnet' ? DEFAULT_MAINNET_ARC_URL : DEFAULT_TESTNET_ARC_URL
+}
+
+export function defaultIndexerBaseUrl(network: BsvNetwork): string {
+  return network === 'mainnet' ? DEFAULT_MAINNET_INDEXER_BASE_URL : DEFAULT_INDEXER_BASE_URL
+}
+
+export function explorerOrigin(network: BsvNetwork): string {
+  return network === 'mainnet' ? 'https://whatsonchain.com' : 'https://test.whatsonchain.com'
+}
+
+export function loadChainEnv(env: NodeJS.ProcessEnv = process.env): {
+  network: BsvNetwork
+  arcUrl: string
+  indexerBase: string
+  explorerOrigin: string
+  wocBroadcast: 'main' | 'test'
+} {
+  const network = parseBsvNetwork(env.NETWORK)
+  return {
+    network,
+    arcUrl: env.ARC_URL ?? defaultArcUrl(network),
+    indexerBase: env.INDEXER_BASE_URL ?? defaultIndexerBaseUrl(network),
+    explorerOrigin: explorerOrigin(network),
+    wocBroadcast: network === 'mainnet' ? 'main' : 'test'
+  }
+}
 
 export function createArcBroadcaster(url: string, apiKey?: string): TxBroadcaster {
   const arc = apiKey ? new ARC(url, apiKey) : new ARC(url)

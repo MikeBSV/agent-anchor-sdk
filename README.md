@@ -1,6 +1,6 @@
 # agent-anchor-sdk
 
-TypeScript SDK for **BSV testnet**: signed AI-agent audit records, plus native 2-of-2 escrow with a timed buyer refund. A later check can prove anchored bytes were not edited. It does not prove the agent told the truth.
+TypeScript SDK for **BSV** (testnet by default, mainnet opt-in): signed AI-agent audit records, plus native 2-of-2 escrow with a timed buyer refund. A later check can prove anchored bytes were not edited. It does not prove the agent told the truth.
 
 Wire format: [PROTOCOL.md](PROTOCOL.md). License: [MIT](LICENSE).
 
@@ -30,10 +30,11 @@ console.log('funding address', funding.toAddress('testnet'))
 console.log('IDENTITY_WIF', identity.toWif())
 console.log('identity address', identity.toAddress('testnet'))
 console.log('SELLER_WIF', seller.toWif())
-console.log('seller address', seller.toAddress('testnet'))
+console.log('seller address (testnet)', seller.toAddress('testnet'))
+console.log('seller address (mainnet)', seller.toAddress('mainnet'))
 ```
 
-Type `.exit` when done. Send tBSV only to the **funding address**. The seller does not need a faucet. Testnet WIFs must not be reused on mainnet.
+Type `.exit` when done. For the examples below, send **tBSV** only to the **testnet funding address**. The seller does not need a faucet on the default complete path. **Never reuse testnet keys on mainnet** — generate a new set and use `toAddress('mainnet')` when you opt in.
 
 ## Storage (`hash` vs `cipher`)
 
@@ -60,7 +61,7 @@ npm run example
 
 That broadcasts two linked **hash** records and verifies each against the original plaintext.
 
-Optional: `ARC_URL` (no `/v1` suffix; the SDK posts to `/v1/tx`), `ARC_API_KEY`, `INDEXER_BASE_URL` (default `https://api.whatsonchain.com/v1/bsv/test`).
+Optional: `NETWORK=mainnet` (default is testnet; uses GorillaPool `https://arc.gorillapool.io` and `https://api.whatsonchain.com/v1/bsv/main` — **new keys only**), `ARC_URL` (no `/v1` suffix; the SDK posts to `/v1/tx`), `ARC_API_KEY`, `INDEXER_BASE_URL` (default testnet `https://api.whatsonchain.com/v1/bsv/test`).
 
 Do not put the funding **address** in `FUNDING_WIF`. After a faucet payment, wait until `https://test.whatsonchain.com/address/<funding-address>` shows the coins (confirmed is more reliable than mempool-only), then run the example.
 
@@ -91,7 +92,7 @@ npm run cipher
 
 ## Escrow
 
-`lockEscrow` / `completeEscrow` / `refundEscrow` lock satoshis in a native Bitcoin script (no sCrypt). Testnet only. Two keys only: humans, agents, or mixed.
+`lockEscrow` / `completeEscrow` / `refundEscrow` lock satoshis in a native Bitcoin script (no sCrypt). Default network is testnet; set `NETWORK=mainnet` to opt in. Two keys only: humans, agents, or mixed.
 
 `FUNDING_WIF` is the **buyer** (locks coins, pays the **lock** fee). The **seller** only needs a key to complete. The **complete** fee is paid by `feeWallet` (buyer or seller). `IDENTITY_WIF` is unused here.
 
@@ -168,4 +169,4 @@ $env:ESCROW_SATS="5000"
 npm run escrow
 ```
 
-The buyer needs confirmed tBSV for the locked amount plus the lock fee. The complete-fee payer (buyer by default) also needs a little extra for that second tx (default 1 sat/kB). Same optional `ARC_URL` / `ARC_API_KEY` / `INDEXER_BASE_URL` as the anchor example.
+The buyer needs confirmed coins for the locked amount plus the lock fee. The complete-fee payer (buyer by default) also needs a little extra for that second tx (default 1 sat/kB). Same optional `NETWORK` / `ARC_URL` / `ARC_API_KEY` / `INDEXER_BASE_URL` as the anchor example.

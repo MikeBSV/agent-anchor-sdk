@@ -2,7 +2,7 @@
 
 This protocol writes a signed AI-agent audit record into a Bitcoin SV transaction. A later check can prove the recorded bytes were not edited. It does not stop an agent from anchoring a false record.
 
-Network for this SDK: BSV **testnet**.
+The same wire format is used on BSV **testnet** and **mainnet**. This SDK defaults to testnet.
 
 ## Transaction
 
@@ -48,4 +48,5 @@ Ciphertext on-chain stays under 100,000 bytes so WhatsOnChain will not truncate 
 
 - Broadcast via ARC (`POST {arcUrl}/v1/tx`).
 - Read UTXOs and raw transaction hex from an indexer (WhatsOnChain-style), behind an interface.
-- Default indexer base: `https://api.whatsonchain.com/v1/bsv/test`
+- Default indexer (testnet): `https://api.whatsonchain.com/v1/bsv/test`
+- Default indexer (mainnet): `https://api.whatsonchain.com/v1/bsv/main`
