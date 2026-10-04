@@ -9,7 +9,8 @@
     "test": "jest",
     "example": "npx ts-node --transpile-only scripts/anchor-two-records.ts",
     "cipher": "npx ts-node --transpile-only scripts/anchor-cipher.ts",
-    "escrow": "npx ts-node --transpile-only scripts/escrow-testnet.ts"
+    "escrow": "npx ts-node --transpile-only scripts/escrow-testnet.ts",
+    "escrow:two-party": "npx ts-node --transpile-only scripts/escrow-two-party.ts"
   },
   "license": "MIT",
   "engines": {

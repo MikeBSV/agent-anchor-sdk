@@ -93,7 +93,7 @@ npm run cipher
 
 `lockEscrow` / `completeEscrow` / `refundEscrow` lock satoshis in a native Bitcoin script (no sCrypt). Testnet only. Two keys only: humans, agents, or mixed.
 
-`FUNDING_WIF` is the **buyer** (locks coins, pays both fees). The **seller** only needs a key and, on complete, a signature. `IDENTITY_WIF` is unused here.
+`FUNDING_WIF` is the **buyer** (locks coins, pays the **lock** fee). The **seller** only needs a key to complete. The **complete** fee is paid by `feeWallet` (buyer or seller). `IDENTITY_WIF` is unused here.
 
 1. **Lock** — buyer P2PKH → escrow of exactly `ESCROW_SATS`, plus change to the buyer. WhatsOnChain shows that output as `nonstandard`. Locktime is fixed then (Unix time, or block height if the number is below 500000000).
 2. **Complete** — buyer and seller both sign. The seller receives **exactly** `ESCROW_SATS`. The complete **fee** is paid by whoever builds (`feeWallet`): buyer or seller. `completeEscrow` is the one-process helper (both keys on one machine). Independent agents exchange a JSON offer:
@@ -114,7 +114,7 @@ The script prints `refund allowed after (unix)` and `(utc)` before it locks. Def
 
 A run with only `FUNDING_WIF` creates a **random seller in memory**. That is a real testnet address, but you cannot spend it later. Set `SELLER_WIF` if you want to control the seller.
 
-Lock then complete:
+Lock then complete (same process, both keys; buyer pays the complete fee):
 
 ```
 $env:FUNDING_WIF="..."
@@ -124,6 +124,19 @@ $env:ESCROW_LOCK_HOURS="48"
 $env:SATOSHIS_PER_KB="1"
 npm run escrow
 ```
+
+Two-party complete on one machine (JSON offer, inspect, both signs). Default `FEE_PAYER=buyer`. Use `FEE_PAYER=seller` only if the seller address already has tBSV for the complete fee:
+
+```
+$env:FUNDING_WIF="..."
+$env:SELLER_WIF="..."
+$env:ESCROW_SATS="5000"
+$env:ESCROW_LOCK_HOURS="48"
+$env:FEE_PAYER="buyer"
+npm run escrow:two-party
+```
+
+It prints `inspect before signs` / `inspect after signs` (`paidSatoshis` should match `ESCROW_SATS`). Independent agents still call `buildCompleteEscrow` / `signCompleteEscrow` / `broadcastCompleteEscrow` and exchange the JSON offer; this script is the live check of that path.
 
 Lock only (save `lock txid`, `lock vout`, and the UTC refund time):
 
@@ -155,4 +168,4 @@ $env:ESCROW_SATS="5000"
 npm run escrow
 ```
 
-The buyer needs confirmed tBSV for the locked amount plus lock and complete/refund fees (default 1 sat/kB). Same optional `ARC_URL` / `ARC_API_KEY` / `INDEXER_BASE_URL` as the anchor example.
+The buyer needs confirmed tBSV for the locked amount plus the lock fee. The complete-fee payer (buyer by default) also needs a little extra for that second tx (default 1 sat/kB). Same optional `ARC_URL` / `ARC_API_KEY` / `INDEXER_BASE_URL` as the anchor example.
