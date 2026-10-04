@@ -6,7 +6,11 @@ import {
   lockEscrow,
   refundEscrow,
   assertEscrowLocktimeNotExcessive,
-  MAX_ESCROW_LOCK_SECONDS
+  MAX_ESCROW_LOCK_SECONDS,
+  buildCompleteEscrow,
+  signCompleteEscrow,
+  broadcastCompleteEscrow,
+  inspectCompleteOffer
 } from '../src/escrow'
 import { fundedWallet, MemoryBroadcaster } from './helpers'
 
@@ -120,5 +124,56 @@ describe('escrow', () => {
       assertEscrowLocktimeNotExcessive(now + MAX_ESCROW_LOCK_SECONDS + 1, { now, allowLong: true })
     ).not.toThrow()
     expect(() => assertEscrowLocktimeNotExcessive(LOCKTIME, { now })).not.toThrow()
+  })
+
+  it('completes when the buyer builds and both parties sign separately', async () => {
+    const { wallet } = fundedWallet(50_000)
+    const seller = PrivateKey.fromRandom()
+    const sellerAddr = seller.toAddress('testnet')
+    const broadcaster = new MemoryBroadcaster()
+    const locked = await lockEscrow(wallet, seller.toPublicKey(), 10_000, LOCKTIME, broadcaster)
+    let offer = await buildCompleteEscrow({
+      escrow: locked,
+      sellerAddress: sellerAddr,
+      sourceWallet: wallet,
+      feeWallet: wallet
+    })
+    const view = inspectCompleteOffer(offer)
+    expect(view.paidSatoshis).toBe(10_000)
+    expect(view.hasBuyerSig).toBe(false)
+    offer = signCompleteEscrow(offer, 'seller', seller)
+    offer = signCompleteEscrow(offer, 'buyer', wallet.fundingKey)
+    await expect(broadcastCompleteEscrow(wallet, { ...offer, sellerSigHex: undefined }, broadcaster)).rejects.toThrow(
+      /buyer and seller/
+    )
+    const pay = await broadcastCompleteEscrow(wallet, offer, broadcaster)
+    expect(pay.paidSatoshis).toBe(10_000)
+    expect(broadcaster.lastTx!.outputs[0].lockingScript.toHex()).toBe(new P2PKH().lock(sellerAddr).toHex())
+  })
+
+  it('completes when the seller builds, pays the fee, and the buyer signs second', async () => {
+    const buyer = fundedWallet(50_000)
+    const sellerFunded = fundedWallet(20_000)
+    const seller = sellerFunded.fundingKey
+    const sellerAddr = seller.toAddress('testnet')
+    const broadcaster = new MemoryBroadcaster()
+    const locked = await lockEscrow(buyer.wallet, seller.toPublicKey(), 10_000, LOCKTIME, broadcaster)
+    sellerFunded.indexer.txs.set(locked.txid, broadcaster.lastTx!.toHex())
+    let offer = await buildCompleteEscrow({
+      escrow: locked,
+      sellerAddress: sellerAddr,
+      sourceWallet: sellerFunded.wallet,
+      feeWallet: sellerFunded.wallet
+    })
+    expect(inspectCompleteOffer(offer).inputCount).toBeGreaterThan(1)
+    offer = signCompleteEscrow(offer, 'buyer', buyer.fundingKey)
+    offer = signCompleteEscrow(offer, 'seller', seller)
+    const pay = await broadcastCompleteEscrow(sellerFunded.wallet, offer, broadcaster)
+    expect(pay.paidSatoshis).toBe(10_000)
+    const payTx = broadcaster.lastTx!
+    expect(payTx.outputs[0].satoshis).toBe(10_000)
+    expect(
+      payTx.outputs.some((o) => o.lockingScript.toHex() === new P2PKH().lock(sellerAddr).toHex() && (o.satoshis ?? 0) > 0)
+    ).toBe(true)
   })
 })

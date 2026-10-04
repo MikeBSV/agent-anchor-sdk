@@ -30,6 +30,15 @@ export interface EscrowSpendResult {
   feeSatoshis: number
 }
 
+/** JSON agents exchange for two-party complete. Fee inputs are already signed by the builder. */
+export interface CompleteOffer {
+  version: 1
+  txHex: string
+  sourceTxHexes: string[]
+  buyerSigHex?: string
+  sellerSigHex?: string
+}
+
 function compressedPub(key: PublicKey): number[] {
   return key.encode(true) as number[]
 }
@@ -60,6 +69,24 @@ function signInput(tx: Transaction, inputIndex: number, key: PrivateKey): number
   return new TransactionSignature(raw.r, raw.s, scope).toChecksigFormat()
 }
 
+function bytesToHex(bytes: number[]): string {
+  return Buffer.from(bytes).toString('hex')
+}
+
+function hexToBytes(hex: string): number[] {
+  if (!/^[0-9a-f]*$/i.test(hex) || hex.length % 2 !== 0) {
+    throw new Error('signature hex is invalid')
+  }
+  return [...Buffer.from(hex, 'hex')]
+}
+
+function placeholderCompleteUnlock() {
+  return {
+    sign: async () => new UnlockingScript(),
+    estimateLength: async () => COMPLETE_UNLOCK_LEN
+  }
+}
+
 export function buildEscrowScript(
   buyerPub: PublicKey,
   sellerPub: PublicKey,
@@ -84,21 +111,6 @@ export function buildEscrowScript(
     .writeBin(buyer)
     .writeOpCode(OP.OP_CHECKSIG)
     .writeOpCode(OP.OP_ENDIF) as LockingScript
-}
-
-function completeUnlockTemplate(buyerKey: PrivateKey, sellerKey: PrivateKey) {
-  return {
-    sign: async (tx: Transaction, inputIndex: number) => {
-      const buyerSig = signInput(tx, inputIndex, buyerKey)
-      const sellerSig = signInput(tx, inputIndex, sellerKey)
-      return new UnlockingScript()
-        .writeOpCode(OP.OP_0)
-        .writeBin(buyerSig)
-        .writeBin(sellerSig)
-        .writeOpCode(OP.OP_TRUE)
-    },
-    estimateLength: async () => COMPLETE_UNLOCK_LEN
-  }
 }
 
 function refundUnlockTemplate(buyerKey: PrivateKey) {
@@ -232,6 +244,118 @@ async function loadEscrowSource(
   return source
 }
 
+function hydrateCompleteOffer(offer: CompleteOffer): Transaction {
+  if (offer.version !== 1 || !offer.txHex || !Array.isArray(offer.sourceTxHexes)) {
+    throw new Error('Complete offer is malformed')
+  }
+  const tx = Transaction.fromHex(offer.txHex)
+  if (tx.inputs.length !== offer.sourceTxHexes.length) {
+    throw new Error('Complete offer source txs do not match inputs')
+  }
+  tx.inputs.forEach((input, i) => {
+    input.sourceTransaction = Transaction.fromHex(offer.sourceTxHexes[i])
+  })
+  return tx
+}
+
+function collectSourceHexes(tx: Transaction): string[] {
+  return tx.inputs.map((input, i) => {
+    if (!input.sourceTransaction) {
+      throw new Error(`Complete input ${i} is missing sourceTransaction`)
+    }
+    return input.sourceTransaction.toHex()
+  })
+}
+
+function attachCompleteUnlock(tx: Transaction, buyerSigHex: string, sellerSigHex: string): void {
+  tx.inputs[0].unlockingScript = new UnlockingScript()
+    .writeOpCode(OP.OP_0)
+    .writeBin(hexToBytes(buyerSigHex))
+    .writeBin(hexToBytes(sellerSigHex))
+    .writeOpCode(OP.OP_TRUE)
+}
+
+export function inspectCompleteOffer(offer: CompleteOffer): {
+  paidSatoshis: number
+  sellerScriptHex: string
+  feeSatoshis: number
+  hasBuyerSig: boolean
+  hasSellerSig: boolean
+  inputCount: number
+} {
+  const tx = hydrateCompleteOffer(offer)
+  const payout = tx.outputs[0]
+  return {
+    paidSatoshis: payout?.satoshis ?? 0,
+    sellerScriptHex: payout?.lockingScript.toHex() ?? '',
+    feeSatoshis: txFeeSatoshis(tx),
+    hasBuyerSig: Boolean(offer.buyerSigHex),
+    hasSellerSig: Boolean(offer.sellerSigHex),
+    inputCount: tx.inputs.length
+  }
+}
+
+export async function buildCompleteEscrow(args: {
+  escrow: { txid: string; outputIndex: number }
+  sellerAddress: string
+  /** Fetches the lock tx (buyer after lock, or any indexer-backed wallet). */
+  sourceWallet: AgentWallet
+  /** Pays the complete fee and receives change. Buyer or seller. */
+  feeWallet: AgentWallet
+}): Promise<CompleteOffer> {
+  const source = await loadEscrowSource(
+    args.sourceWallet,
+    args.escrow.txid,
+    args.escrow.outputIndex
+  )
+  const paidSatoshis = source.outputs[args.escrow.outputIndex].satoshis ?? 0
+  const tx = new Transaction()
+  tx.addInput({
+    sourceTransaction: source,
+    sourceOutputIndex: args.escrow.outputIndex,
+    unlockingScriptTemplate: placeholderCompleteUnlock(),
+    sequence: 0xffffffff
+  })
+  await payExactWithBuyerFee(
+    args.feeWallet,
+    tx,
+    paidSatoshis,
+    new P2PKH().lock(args.sellerAddress)
+  )
+  return {
+    version: 1,
+    txHex: tx.toHex(),
+    sourceTxHexes: collectSourceHexes(tx)
+  }
+}
+
+export function signCompleteEscrow(
+  offer: CompleteOffer,
+  role: 'buyer' | 'seller',
+  key: PrivateKey
+): CompleteOffer {
+  const tx = hydrateCompleteOffer(offer)
+  const sigHex = bytesToHex(signInput(tx, 0, key))
+  if (role === 'buyer') return { ...offer, buyerSigHex: sigHex }
+  return { ...offer, sellerSigHex: sigHex }
+}
+
+export async function broadcastCompleteEscrow(
+  wallet: AgentWallet,
+  offer: CompleteOffer,
+  broadcaster: TxBroadcaster
+): Promise<EscrowSpendResult> {
+  if (!offer.buyerSigHex || !offer.sellerSigHex) {
+    throw new Error('Complete offer needs buyer and seller signatures')
+  }
+  const tx = hydrateCompleteOffer(offer)
+  attachCompleteUnlock(tx, offer.buyerSigHex, offer.sellerSigHex)
+  assertSpendValid(tx)
+  const paidSatoshis = tx.outputs[0].satoshis ?? 0
+  const txid = await wallet.broadcast(tx, broadcaster)
+  return { txid, paidSatoshis, feeSatoshis: txFeeSatoshis(tx) }
+}
+
 export async function lockEscrow(
   buyerWallet: AgentWallet,
   sellerPub: PublicKey,
@@ -266,24 +390,15 @@ export async function completeEscrow(
   sellerAddress: string,
   broadcaster: TxBroadcaster
 ): Promise<EscrowSpendResult> {
-  const source = await loadEscrowSource(buyerWallet, escrow.txid, escrow.outputIndex)
-  const paidSatoshis = source.outputs[escrow.outputIndex].satoshis ?? 0
-  const tx = new Transaction()
-  tx.addInput({
-    sourceTransaction: source,
-    sourceOutputIndex: escrow.outputIndex,
-    unlockingScriptTemplate: completeUnlockTemplate(buyerKey, sellerKey),
-    sequence: 0xffffffff
+  let offer = await buildCompleteEscrow({
+    escrow,
+    sellerAddress,
+    sourceWallet: buyerWallet,
+    feeWallet: buyerWallet
   })
-  await payExactWithBuyerFee(
-    buyerWallet,
-    tx,
-    paidSatoshis,
-    new P2PKH().lock(sellerAddress)
-  )
-  assertSpendValid(tx)
-  const txid = await buyerWallet.broadcast(tx, broadcaster)
-  return { txid, paidSatoshis, feeSatoshis: txFeeSatoshis(tx) }
+  offer = signCompleteEscrow(offer, 'buyer', buyerKey)
+  offer = signCompleteEscrow(offer, 'seller', sellerKey)
+  return broadcastCompleteEscrow(buyerWallet, offer, broadcaster)
 }
 
 export async function refundEscrow(

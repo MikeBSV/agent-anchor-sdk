@@ -96,7 +96,16 @@ npm run cipher
 `FUNDING_WIF` is the **buyer** (locks coins, pays both fees). The **seller** only needs a key and, on complete, a signature. `IDENTITY_WIF` is unused here.
 
 1. **Lock** — buyer P2PKH → escrow of exactly `ESCROW_SATS`, plus change to the buyer. WhatsOnChain shows that output as `nonstandard`. Locktime is fixed then (Unix time, or block height if the number is below 500000000).
-2. **Complete** — both parties sign. The seller receives **exactly** `ESCROW_SATS`. Fees come from the buyer’s change.
+2. **Complete** — buyer and seller both sign. The seller receives **exactly** `ESCROW_SATS`. The complete **fee** is paid by whoever builds (`feeWallet`): buyer or seller. `completeEscrow` is the one-process helper (both keys on one machine). Independent agents exchange a JSON offer:
+
+```js
+let offer = await buildCompleteEscrow({ escrow, sellerAddress, sourceWallet, feeWallet })
+offer = signCompleteEscrow(offer, 'buyer', buyerKey) // either order
+offer = signCompleteEscrow(offer, 'seller', sellerKey)
+await broadcastCompleteEscrow(feeWallet, offer, broadcaster)
+```
+
+Inspect `paidSatoshis` (and the seller script) before signing. The locked amount is the price; a new price is a new lock.
 3. **Refund** — after locktime the **buyer** must broadcast a refund. Nothing refunds by itself. If the seller will not sign, the coins wait until then.
 
 The script prints `refund allowed after (unix)` and `(utc)` before it locks. Default window is **7 days**; **90 days** max unless `ESCROW_ALLOW_LONG_LOCK=1`. Set `ESCROW_LOCK_HOURS` or `ESCROW_LOCKTIME` (Unix time or height).
