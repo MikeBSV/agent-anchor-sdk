@@ -4,15 +4,25 @@
   "description": "Signed AI-agent audit records and native 2-of-2 escrow on BSV (testnet default, mainnet opt-in)",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "license": "MIT",
+  "files": ["dist"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MikeBSV/agent-anchor-sdk.git"
+  },
+  "homepage": "https://github.com/MikeBSV/agent-anchor-sdk#readme",
+  "bugs": {
+    "url": "https://github.com/MikeBSV/agent-anchor-sdk/issues"
+  },
   "scripts": {
     "build": "tsc",
     "test": "jest",
+    "prepublishOnly": "npm run build",
     "example": "npx ts-node --transpile-only scripts/anchor-two-records.ts",
     "cipher": "npx ts-node --transpile-only scripts/anchor-cipher.ts",
     "escrow": "npx ts-node --transpile-only scripts/escrow-testnet.ts",
     "escrow:two-party": "npx ts-node --transpile-only scripts/escrow-two-party.ts"
   },
-  "license": "MIT",
   "engines": {
     "node": ">=22"
   },
