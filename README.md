@@ -36,6 +36,16 @@ console.log('seller address (mainnet)', seller.toAddress('mainnet'))
 
 Type `.exit` when done. For the examples below, send **tBSV** only to the **testnet funding address**. The seller does not need a faucet on the default complete path. **Never reuse testnet keys on mainnet** — generate a new set and use `toAddress('mainnet')` when you opt in.
 
+## Network
+
+Examples default to **testnet**. For mainnet, generate **new** keys (`toAddress('mainnet')`) and in PowerShell:
+
+```
+$env:NETWORK="mainnet"
+```
+
+Then the same `npm run example` / `cipher` / `escrow` / `escrow:two-party` commands use GorillaPool `https://arc.gorillapool.io` and WhatsOnChain mainnet (`https://api.whatsonchain.com/v1/bsv/main`). Omit `NETWORK` or set `$env:NETWORK="testnet"` to stay on testnet. Do not reuse testnet WIFs.
+
 ## Storage (`hash` vs `cipher`)
 
 The protocol is a signed receipt that these **bytes** existed. File format and compression are up to you. Compress first if you want, then pass that `Uint8Array` as `content`. A verifier must use the **same** bytes.
@@ -61,7 +71,7 @@ npm run example
 
 That broadcasts two linked **hash** records and verifies each against the original plaintext.
 
-Optional: `NETWORK=mainnet` (default is testnet; uses GorillaPool `https://arc.gorillapool.io` and `https://api.whatsonchain.com/v1/bsv/main` — **new keys only**), `ARC_URL` (no `/v1` suffix; the SDK posts to `/v1/tx`), `ARC_API_KEY`, `INDEXER_BASE_URL` (default testnet `https://api.whatsonchain.com/v1/bsv/test`).
+Optional: `NETWORK` (see [Network](#network)), `ARC_URL` (no `/v1` suffix; the SDK posts to `/v1/tx`), `ARC_API_KEY`, `INDEXER_BASE_URL` (default testnet `https://api.whatsonchain.com/v1/bsv/test`).
 
 Do not put the funding **address** in `FUNDING_WIF`. After a faucet payment, wait until `https://test.whatsonchain.com/address/<funding-address>` shows the coins (confirmed is more reliable than mempool-only), then run the example.
 
